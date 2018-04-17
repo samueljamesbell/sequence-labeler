@@ -11,6 +11,7 @@ except:
     import pickle
 
 class SequenceLabeler(object):
+
     def __init__(self, config):
         self.config = config
 
@@ -21,7 +22,6 @@ class SequenceLabeler(object):
         self.char2id = None
         self.label2id = None
         self.singletons = None
-
 
     def build_vocabs(self, data_train, data_dev, data_test, embedding_path=None):
         data_source = list(data_train)
@@ -35,6 +35,7 @@ class SequenceLabeler(object):
         for sentence in data_source:
             for word in sentence:
                 char_counter.update(word[0])
+
         self.char2id = collections.OrderedDict([(self.CUNK, 0)])
         for char, count in char_counter.most_common():
             if char not in self.char2id:
@@ -60,7 +61,8 @@ class SequenceLabeler(object):
         label_counter = collections.Counter()
         for sentence in data_train: #this one only based on training data
             for word in sentence:
-                label_counter[word[-1]] += 1
+                # Second item in word vector is the label
+                label_counter[word[1]] += 1
         self.label2id = collections.OrderedDict()
         for label, count in label_counter.most_common():
             if label not in self.label2id:
@@ -90,10 +92,11 @@ class SequenceLabeler(object):
         print("n_labels: " + str(len(self.label2id)))
         print("n_singletons: " + str(len(self.singletons)))
 
-
     def construct_network(self):
         self.word_ids = tf.placeholder(tf.int32, [None, None], name="word_ids")
         self.char_ids = tf.placeholder(tf.int32, [None, None, None], name="char_ids")
+        self.additional_features = tf.placeholder(tf.float32, [None, None, self.config['num_additional_features']], name="additional_features")
+
         self.sentence_lengths = tf.placeholder(tf.int32, [None], name="sentence_lengths")
         self.word_lengths = tf.placeholder(tf.int32, [None, None], name="word_lengths")
         self.label_ids = tf.placeholder(tf.int32, [None, None], name="label_ids")
@@ -102,7 +105,6 @@ class SequenceLabeler(object):
 
         self.loss = 0.0
         input_tensor = None
-        input_vector_size = 0
 
         self.initializer = None
         if self.config["initializer"] == "normal":
@@ -119,10 +121,15 @@ class SequenceLabeler(object):
             initializer=(tf.zeros_initializer() if self.config["emb_initial_zero"] == True else self.initializer), 
             trainable=(True if self.config["train_embeddings"] == True else False))
         input_tensor = tf.nn.embedding_lookup(self.word_embeddings, self.word_ids)
-        input_vector_size = self.config["word_embedding_size"]
+
+        # Concat the additional features tensor to our input (word embeddings) tensor.
+        if self.config['add_features_to_input']:
+            input_tensor = tf.concat([input_tensor, self.additional_features], axis=2)
 
         if self.config["char_embedding_size"] > 0 and self.config["char_recurrent_size"] > 0:
-            with tf.variable_scope("chars"), tf.control_dependencies([tf.assert_equal(tf.shape(self.char_ids)[2], tf.reduce_max(self.word_lengths), message="Char dimensions don't match")]):
+            with tf.variable_scope("chars"), tf.control_dependencies([tf.assert_equal(tf.shape(self.char_ids)[2],
+                                                                                      tf.reduce_max(self.word_lengths),
+                                                                                      message="Char dimensions don't match")]):
                 self.char_embeddings = tf.get_variable("char_embeddings", 
                     shape=[len(self.char2id), self.config["char_embedding_size"]], 
                     initializer=self.initializer, 
@@ -144,7 +151,8 @@ class SequenceLabeler(object):
                     initializer=self.initializer,
                     reuse=False)
 
-                char_lstm_outputs = tf.nn.bidirectional_dynamic_rnn(char_lstm_cell_fw, char_lstm_cell_bw, char_input_tensor, sequence_length=_word_lengths, dtype=tf.float32, time_major=False)
+                char_lstm_outputs = tf.nn.bidirectional_dynamic_rnn(char_lstm_cell_fw, char_lstm_cell_bw, char_input_tensor,
+                                                                    sequence_length=_word_lengths, dtype=tf.float32, time_major=False)
                 _, ((_, char_output_fw), (_, char_output_bw)) = char_lstm_outputs
                 char_output_tensor = tf.concat([char_output_fw, char_output_bw], axis=-1)
                 char_output_tensor = tf.reshape(char_output_tensor, shape=[s[0], s[1], 2 * self.config["char_recurrent_size"]])
@@ -158,11 +166,18 @@ class SequenceLabeler(object):
                 if self.config["char_hidden_layer_size"] > 0:
                     char_hidden_layer_size = self.config["word_embedding_size"] if self.config["char_integration_method"] == "attention" else self.config["char_hidden_layer_size"]
                     char_output_tensor = tf.layers.dense(char_output_tensor, char_hidden_layer_size, activation=tf.tanh, kernel_initializer=self.initializer)
+
+                    # The input tensor is word_embedding_size + num_additional_features,
+                    # because we added the additional features tensor. Therefore add a slice of
+                    # zeroes to the character tensor so the dimensions match.
+                    if self.config['add_features_to_input']:
+                        char_output_tensor = tf.pad(char_output_tensor, tf.constant([[0, 0], [0, 0], [0, self.config['num_additional_features']]]))
+
                     char_output_vector_size = char_hidden_layer_size
 
                 if self.config["char_integration_method"] == "concat":
                     input_tensor = tf.concat([input_tensor, char_output_tensor], axis=-1)
-                    input_vector_size += char_output_vector_size
+
                 elif self.config["char_integration_method"] == "attention":
                     assert(char_output_vector_size == self.config["word_embedding_size"]), "This method requires the char representation to have the same size as word embeddings"
                     static_input_tensor = tf.stop_gradient(input_tensor)
@@ -174,16 +189,24 @@ class SequenceLabeler(object):
                     cosine_cost_unk = tf.where(tf.logical_or(is_unk, is_padding), x=tf.zeros_like(cosine_cost), y=cosine_cost)
                     self.loss += self.config["char_attention_cosine_cost"] * tf.reduce_sum(cosine_cost_unk)
                     attention_evidence_tensor = tf.concat([input_tensor, char_output_tensor], axis=2)
-                    attention_output = tf.layers.dense(attention_evidence_tensor, self.config["word_embedding_size"], activation=tf.tanh, kernel_initializer=self.initializer)
-                    attention_output = tf.layers.dense(attention_output, self.config["word_embedding_size"], activation=tf.sigmoid, kernel_initializer=self.initializer)
+
+                    # Attention layers should be word_embedding_size + num_additional_features
+                    # because we added our arbitrary feature vector to the embedding
+                    d = self.config['word_embedding_size'] + (self.config['num_additional_features'] if self.config['add_features_to_input'] else 0)
+                    attention_output = tf.layers.dense(attention_evidence_tensor, d,
+                                                       activation=tf.tanh, kernel_initializer=self.initializer)
+                    attention_output = tf.layers.dense(attention_output, d,
+                                                       activation=tf.sigmoid, kernel_initializer=self.initializer)
+
                     input_tensor = tf.multiply(input_tensor, attention_output) + tf.multiply(char_output_tensor, (1.0 - attention_output))
                 elif self.config["char_integration_method"] == "none":
                     input_tensor = input_tensor
                 else:
                     raise ValueError("Unknown char integration method")
 
-        dropout_input = self.config["dropout_input"] * tf.cast(self.is_training, tf.float32) + (1.0 - tf.cast(self.is_training, tf.float32))
-        input_tensor =  tf.nn.dropout(input_tensor, dropout_input, name="dropout_word")
+        if self.config["dropout_input"] > 0:
+            dropout_input = self.config["dropout_input"] * tf.cast(self.is_training, tf.float32) + (1.0 - tf.cast(self.is_training, tf.float32))
+            input_tensor =  tf.nn.dropout(input_tensor, dropout_input, name="dropout_word")
 
         word_lstm_cell_fw = tf.nn.rnn_cell.LSTMCell(self.config["word_recurrent_size"], 
             use_peepholes=self.config["lstm_use_peepholes"], 
@@ -199,9 +222,10 @@ class SequenceLabeler(object):
         with tf.control_dependencies([tf.assert_equal(tf.shape(self.word_ids)[1], tf.reduce_max(self.sentence_lengths), message="Sentence dimensions don't match")]):
             (lstm_outputs_fw, lstm_outputs_bw), _ = tf.nn.bidirectional_dynamic_rnn(word_lstm_cell_fw, word_lstm_cell_bw, input_tensor, sequence_length=self.sentence_lengths, dtype=tf.float32, time_major=False)
 
-        dropout_word_lstm = self.config["dropout_word_lstm"] * tf.cast(self.is_training, tf.float32) + (1.0 - tf.cast(self.is_training, tf.float32))
-        lstm_outputs_fw =  tf.nn.dropout(lstm_outputs_fw, dropout_word_lstm)
-        lstm_outputs_bw =  tf.nn.dropout(lstm_outputs_bw, dropout_word_lstm)
+        if self.config["dropout_word_lstm"]:
+            dropout_word_lstm = self.config["dropout_word_lstm"] * tf.cast(self.is_training, tf.float32) + (1.0 - tf.cast(self.is_training, tf.float32))
+            lstm_outputs_fw =  tf.nn.dropout(lstm_outputs_fw, dropout_word_lstm)
+            lstm_outputs_bw =  tf.nn.dropout(lstm_outputs_bw, dropout_word_lstm)
 
         if self.config["lmcost_lstm_gamma"] > 0.0:
             self.loss += self.config["lmcost_lstm_gamma"] * self.construct_lmcost(lstm_outputs_fw, lstm_outputs_bw, self.sentence_lengths, self.word_ids, "separate", "lmcost_lstm_separate")
@@ -209,11 +233,12 @@ class SequenceLabeler(object):
             self.loss += self.config["lmcost_joint_lstm_gamma"] * self.construct_lmcost(lstm_outputs_fw, lstm_outputs_bw, self.sentence_lengths, self.word_ids, "joint", "lmcost_lstm_joint")
 
         processed_tensor = tf.concat([lstm_outputs_fw, lstm_outputs_bw], 2)
-        processed_tensor_size = self.config["word_recurrent_size"] * 2
+
+        if self.config['add_features_to_output']:
+            processed_tensor = tf.concat([processed_tensor, self.additional_features], axis=2)
 
         if self.config["hidden_layer_size"] > 0:
             processed_tensor = tf.layers.dense(processed_tensor, self.config["hidden_layer_size"], activation=tf.tanh, kernel_initializer=self.initializer)
-            processed_tensor_size = self.config["hidden_layer_size"]
 
         self.scores = tf.layers.dense(processed_tensor, len(self.label2id), activation=None, kernel_initializer=self.initializer, name="output_ff")
 
@@ -285,7 +310,7 @@ class SequenceLabeler(object):
     def preload_word_embeddings(self, embedding_path):
         loaded_embeddings = set()
         embedding_matrix = self.session.run(self.word_embeddings)
-        with open(embedding_path, 'r') as f:
+        with open(embedding_path, 'r', encoding='utf-8') as f:
             for line in f:
                 line_parts = line.strip().split()
                 if len(line_parts) <= 2:
@@ -333,18 +358,34 @@ class SequenceLabeler(object):
         char_ids = numpy.zeros((len(batch), max_sentence_length, max_word_length), dtype=numpy.int32)
         word_lengths = numpy.zeros((len(batch), max_sentence_length), dtype=numpy.int32)
         label_ids = numpy.zeros((len(batch), max_sentence_length), dtype=numpy.int32)
+        additional_features = numpy.zeros((len(batch),
+                                           max_sentence_length,
+                                           self.config['num_additional_features']),
+                                          dtype=numpy.float32)
 
         singletons = self.singletons if is_training == True else None
         singletons_prob = self.config["singletons_prob"] if is_training == True else 0.0
+
         for i in range(len(batch)):
             for j in range(len(batch[i])):
                 word_ids[i][j] = self.translate2id(batch[i][j][0], self.word2id, self.UNK, lowercase=self.config["lowercase"], replace_digits=self.config["replace_digits"], singletons=singletons, singletons_prob=singletons_prob)
-                label_ids[i][j] = self.translate2id(batch[i][j][-1], self.label2id, None)
+                label_ids[i][j] = self.translate2id(batch[i][j][1], self.label2id, None)
+                additional_features[i][j] = numpy.array(batch[i][j][2:]).astype(numpy.float32)
                 word_lengths[i][j] = len(batch[i][j][0])
                 for k in range(min(len(batch[i][j][0]), max_word_length)):
                     char_ids[i][j][k] = self.translate2id(batch[i][j][0][k], self.char2id, self.CUNK)
 
-        input_dictionary = {self.word_ids: word_ids, self.char_ids: char_ids, self.sentence_lengths: sentence_lengths, self.word_lengths: word_lengths, self.label_ids: label_ids, self.learningrate: learningrate, self.is_training: is_training}
+        input_dictionary = {
+                self.word_ids: word_ids,
+                self.char_ids: char_ids,
+                self.sentence_lengths: sentence_lengths,
+                self.word_lengths: word_lengths,
+                self.label_ids: label_ids,
+                self.learningrate: learningrate,
+                self.is_training: is_training,
+                self.additional_features: additional_features
+        }
+
         return input_dictionary
 
 

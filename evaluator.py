@@ -29,7 +29,7 @@ class SequenceLabelingEvaluator(object):
         for i in range(len(batch)):
             for j in range(len(batch[i])):
                 token = batch[i][j][0]
-                gold_label = batch[i][j][-1]
+                gold_label = batch[i][j][1]
                 predicted_label = self.id2label[predicted_labels[i][j]]
 
                 self.token_count += 1

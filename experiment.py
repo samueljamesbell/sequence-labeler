@@ -1,10 +1,11 @@
-import sys
 import collections
-import numpy
-import random
-import math
-import os
 import gc
+import math
+import numpy
+import os
+import random
+import sys
+
 
 try:
     import ConfigParser as configparser
@@ -15,23 +16,24 @@ except:
 from labeler import SequenceLabeler
 from evaluator import SequenceLabelingEvaluator
 
+
 def read_input_files(file_paths, max_sentence_length=-1):
     """
     Reads input files in whitespace-separated format.
     Will split file_paths on comma, reading from multiple files.
-    The format assumes the first column is the word, the last column is the label.
+    The format assumes the first column is the word, the second column is the
+    label, and every column thereafter is a feature.
     """
     sentences = []
     line_length = None
     for file_path in file_paths.strip().split(","):
-        with open(file_path, "r") as f:
+        with open(file_path, "r", encoding='utf-8') as f:
             sentence = []
             for line in f:
                 line = line.strip()
                 if len(line) > 0:
                     line_parts = line.split()
                     assert(len(line_parts) >= 2)
-                    assert(len(line_parts) == line_length or line_length == None)
                     line_length = len(line_parts)
                     sentence.append(line_parts)
                 elif len(line) == 0 and len(sentence) > 0:
@@ -63,7 +65,7 @@ def parse_config(config_section, config_path):
         elif is_float(value):
             config[key] = config_parser.getfloat(config_section, key)
         else:
-            config[key] = config_parser.get(config_section, key)
+            config[key] = os.path.expandvars(config_parser.get(config_section, key))
     return config
 
 
@@ -151,7 +153,7 @@ def process_sentences(data, labeler, is_training, learningrate, config, name):
 
 def run_experiment(config_path):
     config = parse_config("config", config_path)
-    temp_model_path = config_path + ".model"
+    temp_model_path = os.path.join(config['temp_model_path'], os.path.split(config_path)[1]) + ".model"
     if "random_seed" in config:
         random.seed(config["random_seed"])
         numpy.random.seed(config["random_seed"])
@@ -193,10 +195,14 @@ def run_experiment(config_path):
             print("current_learningrate: " + str(learningrate))
             random.shuffle(data_train)
 
-            results_train = process_sentences(data_train, labeler, is_training=True, learningrate=learningrate, config=config, name="train")
+            results_train = process_sentences(data_train, labeler,
+                    is_training=True, learningrate=learningrate, config=config,
+                    name="train")
 
             if data_dev != None:
-                results_dev = process_sentences(data_dev, labeler, is_training=False, learningrate=0.0, config=config, name="dev")
+                results_dev = process_sentences(data_dev, labeler,
+                        is_training=False, learningrate=0.0, config=config,
+                        name="dev")
 
                 if math.isnan(results_dev["dev_cost_sum"]) or math.isinf(results_dev["dev_cost_sum"]):
                     sys.stderr.write("ERROR: Cost is NaN or Inf. Exiting.\n")
@@ -234,7 +240,9 @@ def run_experiment(config_path):
         i = 0
         for path_test in config["path_test"].strip().split(":"):
             data_test = read_input_files(path_test)
-            results_test = process_sentences(data_test, labeler, is_training=False, learningrate=0.0, config=config, name="test"+str(i))
+            results_test = process_sentences(data_test, labeler,
+                    is_training=False, learningrate=0.0, config=config,
+                    name="test"+str(i))
             i += 1
 
 
