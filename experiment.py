@@ -1,10 +1,13 @@
 import collections
 import gc
-import math
+import itertools
 import numpy
+import math
+import linecache
 import os
 import random
 import sys
+import tempfile
 
 
 try:
@@ -15,6 +18,37 @@ except:
 
 from labeler import SequenceLabeler
 from evaluator import SequenceLabelingEvaluator
+
+
+def read_input_features(path):
+    sentences = []
+    with open(path, "r", encoding='utf-8') as f:
+        sentence = []
+        for line in f:
+            line = line.strip()
+            if len(line) > 0:
+                _, _, *features = line.split()
+                sentence.append(features)
+            elif len(line) == 0 and len(sentence) > 0:
+                sentences.append(sentence)
+                sentence = []
+        if len(sentence) > 0:
+                sentences.append(sentence)
+
+
+    _, tmp_path = tempfile.mkstemp()
+    with open(tmp_path, 'w') as f:
+        for sentence in sentences:
+            to_write = '{}\n'.format('\t'.join(list(itertools.chain.from_iterable(sentence))))
+            f.write(to_write)
+
+    return tmp_path
+
+
+def load_sentence_id(path, sentence_id, num_features):
+    feature_line = linecache.getline(path, int(sentence_id) + 1).strip()
+    features = numpy.fromstring(feature_line, sep='\t')
+    return numpy.array(numpy.split(features, len(features) / num_features))
 
 
 def read_input_files(file_paths, max_sentence_length=-1):
@@ -35,7 +69,7 @@ def read_input_files(file_paths, max_sentence_length=-1):
                     line_parts = line.split()
                     assert(len(line_parts) >= 2)
                     line_length = len(line_parts)
-                    sentence.append(line_parts)
+                    sentence.append(line_parts[:2])
                 elif len(line) == 0 and len(sentence) > 0:
                     if max_sentence_length <= 0 or len(sentence) <= max_sentence_length:
                         sentences.append(sentence)
@@ -44,7 +78,6 @@ def read_input_files(file_paths, max_sentence_length=-1):
                 if max_sentence_length <= 0 or len(sentence) <= max_sentence_length:
                     sentences.append(sentence)
     return sentences
-
 
 
 def parse_config(config_section, config_path):
@@ -124,17 +157,23 @@ def create_batches_of_sentence_ids(sentences, batch_equal_size, max_batch_size):
 
 
 
-def process_sentences(data, labeler, is_training, learningrate, config, name):
+def process_sentences(data, labeler, is_training, learningrate, config, name, feature_path, num_additional_features):
     """
     Process all the sentences with the labeler, return evaluation metrics.
     """
     evaluator = SequenceLabelingEvaluator(config["main_label"], labeler.label2id, config["conll_eval"])
     batches_of_sentence_ids = create_batches_of_sentence_ids(data, config["batch_equal_size"], config["max_batch_size"])
-    if is_training == True:
-        random.shuffle(batches_of_sentence_ids)
+#    if is_training == True:
+#        random.shuffle(batches_of_sentence_ids)
 
     for sentence_ids_in_batch in batches_of_sentence_ids:
-        batch = [data[i] for i in sentence_ids_in_batch]
+        batch = [
+            numpy.concatenate((data[i],
+                               load_sentence_id(feature_path, i,
+                                                num_additional_features)), axis=1)
+            for i in sentence_ids_in_batch
+        ]
+
         cost, predicted_labels, predicted_probs = labeler.process_batch(batch, is_training, learningrate)
 
         evaluator.append_data(cost, batch, predicted_labels)
@@ -164,8 +203,10 @@ def run_experiment(config_path):
     data_train, data_dev, data_test = None, None, None
     if config["path_train"] != None and len(config["path_train"]) > 0:
         data_train = read_input_files(config["path_train"], config["max_train_sent_length"])
+        feature_path_train = read_input_features(config['path_train'])
     if config["path_dev"] != None and len(config["path_dev"]) > 0:
         data_dev = read_input_files(config["path_dev"])
+        feature_path_dev = read_input_features(config['path_dev'])
     if config["path_test"] != None and len(config["path_test"]) > 0:
         data_test = []
         for path_test in config["path_test"].strip().split(":"):
@@ -193,16 +234,17 @@ def run_experiment(config_path):
         for epoch in range(config["epochs"]):
             print("EPOCH: " + str(epoch))
             print("current_learningrate: " + str(learningrate))
-            random.shuffle(data_train)
+#            random.shuffle(data_train)
 
             results_train = process_sentences(data_train, labeler,
                     is_training=True, learningrate=learningrate, config=config,
-                    name="train")
+                    name="train", feature_path=feature_path_train, num_additional_features=config['num_additional_features'])
 
             if data_dev != None:
                 results_dev = process_sentences(data_dev, labeler,
                         is_training=False, learningrate=0.0, config=config,
-                        name="dev")
+                        name="dev", feature_path=feature_path_dev,
+                        num_additional_features=config['num_additional_features'])
 
                 if math.isnan(results_dev["dev_cost_sum"]) or math.isinf(results_dev["dev_cost_sum"]):
                     sys.stderr.write("ERROR: Cost is NaN or Inf. Exiting.\n")
@@ -240,9 +282,11 @@ def run_experiment(config_path):
         i = 0
         for path_test in config["path_test"].strip().split(":"):
             data_test = read_input_files(path_test)
+            feature_path_test = read_input_features(path_test)
             results_test = process_sentences(data_test, labeler,
                     is_training=False, learningrate=0.0, config=config,
-                    name="test"+str(i))
+                    name="test"+str(i), feature_path=feature_path_test,
+                    num_additional_features=config['num_additional_features'])
             i += 1
 
 
