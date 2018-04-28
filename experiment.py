@@ -20,7 +20,7 @@ from labeler import SequenceLabeler
 from evaluator import SequenceLabelingEvaluator
 
 
-def read_input_features(path):
+def read_input_features(path, temp_dir):
     sentences = []
     with open(path, "r", encoding='utf-8') as f:
         sentence = []
@@ -36,7 +36,7 @@ def read_input_features(path):
                 sentences.append(sentence)
 
 
-    _, tmp_path = tempfile.mkstemp()
+    _, tmp_path = tempfile.mkstemp(dir=temp_dir)
     with open(tmp_path, 'w') as f:
         for sentence in sentences:
             to_write = '{}\n'.format('\t'.join(list(itertools.chain.from_iterable(sentence))))
@@ -203,10 +203,10 @@ def run_experiment(config_path):
     data_train, data_dev, data_test = None, None, None
     if config["path_train"] != None and len(config["path_train"]) > 0:
         data_train = read_input_files(config["path_train"], config["max_train_sent_length"])
-        feature_path_train = read_input_features(config['path_train'])
+        feature_path_train = read_input_features(config['path_train'], config['feature_dir'])
     if config["path_dev"] != None and len(config["path_dev"]) > 0:
         data_dev = read_input_files(config["path_dev"])
-        feature_path_dev = read_input_features(config['path_dev'])
+        feature_path_dev = read_input_features(config['path_dev'], config['feature_dir'])
     if config["path_test"] != None and len(config["path_test"]) > 0:
         data_test = []
         for path_test in config["path_test"].strip().split(":"):
@@ -282,7 +282,7 @@ def run_experiment(config_path):
         i = 0
         for path_test in config["path_test"].strip().split(":"):
             data_test = read_input_files(path_test)
-            feature_path_test = read_input_features(path_test)
+            feature_path_test = read_input_features(path_test, config['feature_dir'])
             results_test = process_sentences(data_test, labeler,
                     is_training=False, learningrate=0.0, config=config,
                     name="test"+str(i), feature_path=feature_path_test,
