@@ -235,10 +235,12 @@ class SequenceLabeler(object):
         processed_tensor = tf.concat([lstm_outputs_fw, lstm_outputs_bw], 2)
 
         if self.config['add_features_to_output']:
-            processed_tensor = tf.concat([processed_tensor, self.additional_features], axis=2)
+
             if self.config["dropout_output"]:
                 dropout_output = self.config["dropout_output"] * tf.cast(self.is_training, tf.float32) + (1.0 - tf.cast(self.is_training, tf.float32))
-                processed_tensor =  tf.nn.dropout(processed_tensor, dropout_output)
+                self.additional_features = tf.nn.dropout(self.additional_features, dropout_output)
+
+            processed_tensor = tf.concat([processed_tensor, self.additional_features], axis=2)
 
         if self.config["hidden_layer_size"] > 0:
             processed_tensor = tf.layers.dense(processed_tensor, self.config["hidden_layer_size"], activation=tf.tanh, kernel_initializer=self.initializer)
