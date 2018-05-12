@@ -237,6 +237,9 @@ class SequenceLabeler(object):
         if self.config['add_features_to_output']:
             processed_tensor = tf.concat([processed_tensor, self.additional_features], axis=2)
 
+            if self.config["hidden_layer_size"] > 0:
+                processed_tensor = tf.layers.dense(processed_tensor, self.config["hidden_layer_size"], activation=tf.tanh, kernel_initializer=self.initializer)
+
             if self.config.get('lstm_over_features'):
                 print('aaaa')
                 feature_lstm_cell_fw = tf.nn.rnn_cell.LSTMCell(self.config["word_recurrent_size"], 
