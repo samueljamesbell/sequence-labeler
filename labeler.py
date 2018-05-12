@@ -235,29 +235,30 @@ class SequenceLabeler(object):
         processed_tensor = tf.concat([lstm_outputs_fw, lstm_outputs_bw], 2)
 
         if self.config['add_features_to_output']:
-            processed_tensor = tf.concat([processed_tensor, self.additional_features], axis=2)
+            with tf.variable_scope("features"):
+                processed_tensor = tf.concat([processed_tensor, self.additional_features], axis=2)
 
-            if self.config["hidden_layer_size"] > 0:
-                processed_tensor = tf.layers.dense(processed_tensor, self.config["hidden_layer_size"], activation=tf.tanh, kernel_initializer=self.initializer)
+                if self.config["hidden_layer_size"] > 0:
+                    processed_tensor = tf.layers.dense(processed_tensor, self.config["hidden_layer_size"], activation=tf.tanh, kernel_initializer=self.initializer)
 
-            if self.config.get('lstm_over_features'):
-                print('aaaa')
-                feature_lstm_cell_fw = tf.nn.rnn_cell.LSTMCell(self.config["word_recurrent_size"], 
-                    state_is_tuple=True, 
-                    initializer=self.initializer,
-                    reuse=False)
-                feature_lstm_cell_bw = tf.nn.rnn_cell.LSTMCell(self.config["word_recurrent_size"], 
-                    state_is_tuple=True, 
-                    initializer=self.initializer,
-                    reuse=False)
+                if self.config.get('lstm_over_features'):
+                    print('aaaa')
+                    feature_lstm_cell_fw = tf.nn.rnn_cell.LSTMCell(self.config["word_recurrent_size"], 
+                        state_is_tuple=True, 
+                        initializer=self.initializer,
+                        reuse=False)
+                    feature_lstm_cell_bw = tf.nn.rnn_cell.LSTMCell(self.config["word_recurrent_size"], 
+                        state_is_tuple=True, 
+                        initializer=self.initializer,
+                        reuse=False)
 
-                (feature_lstm_outputs_fw, feature_lstm_outputs_bw), _ = tf.nn.bidirectional_dynamic_rnn(feature_lstm_cell_fw, feature_lstm_cell_bw, processed_tensor, sequence_length=self.sentence_lengths, dtype=tf.float32, time_major=False)
+                    (feature_lstm_outputs_fw, feature_lstm_outputs_bw), _ = tf.nn.bidirectional_dynamic_rnn(feature_lstm_cell_fw, feature_lstm_cell_bw, processed_tensor, sequence_length=self.sentence_lengths, dtype=tf.float32, time_major=False)
 
-                dropout_feature_lstm = self.config["dropout_word_lstm"] * tf.cast(self.is_training, tf.float32) + (1.0 - tf.cast(self.is_training, tf.float32))
-                feature_lstm_outputs_fw = tf.nn.dropout(feature_lstm_outputs_fw, dropout_feature_lstm)
-                feature_lstm_outputs_bw = tf.nn.dropout(feature_lstm_outputs_bw, dropout_feature_lstm)
+                    dropout_feature_lstm = self.config["dropout_word_lstm"] * tf.cast(self.is_training, tf.float32) + (1.0 - tf.cast(self.is_training, tf.float32))
+                    feature_lstm_outputs_fw = tf.nn.dropout(feature_lstm_outputs_fw, dropout_feature_lstm)
+                    feature_lstm_outputs_bw = tf.nn.dropout(feature_lstm_outputs_bw, dropout_feature_lstm)
 
-                processed_tensor = tf.concat([feature_lstm_outputs_fw, feature_lstm_outputs_bw], 2)
+                    processed_tensor = tf.concat([feature_lstm_outputs_fw, feature_lstm_outputs_bw], 2)
 
         if self.config["hidden_layer_size"] > 0:
             processed_tensor = tf.layers.dense(processed_tensor, self.config["hidden_layer_size"], activation=tf.tanh, kernel_initializer=self.initializer)
