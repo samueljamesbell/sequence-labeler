@@ -35,7 +35,6 @@ def read_input_features(path, temp_dir):
         if len(sentence) > 0:
                 sentences.append(sentence)
 
-
     _, tmp_path = tempfile.mkstemp(dir=temp_dir)
     with open(tmp_path, 'w') as f:
         for sentence in sentences:
