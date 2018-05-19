@@ -96,6 +96,7 @@ class SequenceLabeler(object):
         self.word_ids = tf.placeholder(tf.int32, [None, None], name="word_ids")
         self.char_ids = tf.placeholder(tf.int32, [None, None, None], name="char_ids")
         self.additional_features = tf.placeholder(tf.float32, [None, None, self.config['num_additional_features']], name="additional_features")
+        self.categoricals = tf.placeholder(tf.int32, [None, None], name="categoricals")
 
         self.sentence_lengths = tf.placeholder(tf.int32, [None], name="sentence_lengths")
         self.word_lengths = tf.placeholder(tf.int32, [None, None], name="word_lengths")
@@ -121,6 +122,17 @@ class SequenceLabeler(object):
             initializer=(tf.zeros_initializer() if self.config["emb_initial_zero"] == True else self.initializer), 
             trainable=(True if self.config["train_embeddings"] == True else False))
         input_tensor = tf.nn.embedding_lookup(self.word_embeddings, self.word_ids)
+
+        feature_vocab_size = 2 ** int(self.config['num_additional_features'])
+        print('Feature vocab size: {}'.format(feature_vocab_size))
+        self.feature_embeddings = tf.get_variable("feature_embeddings", 
+            shape=[feature_vocab_size, self.config.get("feature_embedding_size", 100)], 
+            initializer=(tf.zeros_initializer() if self.config["emb_initial_zero"] == True else self.initializer), 
+            trainable=True)
+        feature_tensor = tf.nn.embedding_lookup(self.feature_embeddings, self.categoricals)
+
+        if self.config['add_categoricals_to_input']:
+            input_tensor = tf.concat([input_tensor, feature_tensor], axis=2)
 
         # Concat the additional features tensor to our input (word embeddings) tensor.
         if self.config['add_features_to_input']:
@@ -236,13 +248,18 @@ class SequenceLabeler(object):
 
         if self.config['add_features_to_output']:
             with tf.variable_scope("features"):
-                processed_tensor = tf.concat([processed_tensor, self.additional_features], axis=2)
+                additional_features = self.additional_features
 
-                if self.config["hidden_layer_size"] > 0:
-                    processed_tensor = tf.layers.dense(processed_tensor, self.config["hidden_layer_size"], activation=tf.tanh, kernel_initializer=self.initializer)
+                if self.config.get('additional_features_dropout', 0.0) > 0:
+                    additional_features_dropout = self.config["additional_features_dropout"] * tf.cast(self.is_training, tf.float32) + (1.0 - tf.cast(self.is_training, tf.float32))
+                    additional_features = tf.nn.dropout(self.additional_features, additional_features_dropout)
+
+                processed_tensor = tf.concat([processed_tensor, additional_features], axis=2)
+
 
                 if self.config.get('lstm_over_features'):
-                    print('aaaa')
+                    if self.config.get("additional_features_projection", 0) > 0:
+                        processed_tensor = tf.layers.dense(processed_tensor, self.config["additional_features_projection"], activation=tf.tanh, kernel_initializer=self.initializer)
                     feature_lstm_cell_fw = tf.nn.rnn_cell.LSTMCell(self.config["word_recurrent_size"], 
                         state_is_tuple=True, 
                         initializer=self.initializer,
@@ -381,6 +398,7 @@ class SequenceLabeler(object):
         char_ids = numpy.zeros((len(batch), max_sentence_length, max_word_length), dtype=numpy.int32)
         word_lengths = numpy.zeros((len(batch), max_sentence_length), dtype=numpy.int32)
         label_ids = numpy.zeros((len(batch), max_sentence_length), dtype=numpy.int32)
+        categoricals = numpy.zeros((len(batch), max_sentence_length), dtype=numpy.int32)
         additional_features = numpy.zeros((len(batch),
                                            max_sentence_length,
                                            self.config['num_additional_features']),
@@ -394,6 +412,8 @@ class SequenceLabeler(object):
                 word_ids[i][j] = self.translate2id(batch[i][j][0], self.word2id, self.UNK, lowercase=self.config["lowercase"], replace_digits=self.config["replace_digits"], singletons=singletons, singletons_prob=singletons_prob)
                 label_ids[i][j] = self.translate2id(batch[i][j][1], self.label2id, None)
                 additional_features[i][j] = batch[i][j][2:].astype(numpy.float32)
+                if self.config['add_categoricals_to_input']:
+                    categoricals[i][j] = int(''.join(map(str, additional_features[i][j].astype(int))), 2)
                 word_lengths[i][j] = len(batch[i][j][0])
                 for k in range(min(len(batch[i][j][0]), max_word_length)):
                     char_ids[i][j][k] = self.translate2id(batch[i][j][0][k], self.char2id, self.CUNK)
@@ -406,7 +426,8 @@ class SequenceLabeler(object):
                 self.label_ids: label_ids,
                 self.learningrate: learningrate,
                 self.is_training: is_training,
-                self.additional_features: additional_features
+                self.additional_features: additional_features,
+                self.categoricals: categoricals
         }
 
         return input_dictionary
