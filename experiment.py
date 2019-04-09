@@ -53,6 +53,7 @@ def read_input_files(file_paths, max_sentence_length=-1):
     The format assumes the first column is the word, the second column is the
     label, and every column thereafter is a feature.
     """
+    print('Reading input file tokens and gold labels from %s'.format(path))
     sentences = []
     line_length = None
     for file_path in file_paths.strip().split(","):

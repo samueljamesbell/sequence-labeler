@@ -13,6 +13,9 @@ def print_predictions(print_probs, model_path, input_file):
     config = model.config
     predictions_cache = {}
 
+    num_additional_features = config['num_additional_features']
+    num_additional_feature_vectors = 3
+
     id2label = collections.OrderedDict()
     for label in model.label2id:
         id2label[model.label2id[label]] = label
@@ -20,8 +23,24 @@ def print_predictions(print_probs, model_path, input_file):
     sentences_test = experiment.read_input_files(input_file)
     batches_of_sentence_ids = experiment.create_batches_of_sentence_ids(sentences_test, config["batch_equal_size"], config['max_batch_size'])
 
+    feature_path = experiment.read_input_features(input_file, 'models/')
+
+    print(feature_path)
+
+    print(len(experiment.load_sentence_id(feature_path, 0,
+        num_additional_features, 3)))
+    print(len(experiment.load_sentence_id(feature_path, 0,
+        num_additional_features, 3)[0]))
+
     for sentence_ids_in_batch in batches_of_sentence_ids:
-        batch = [sentences_test[i] for i in sentence_ids_in_batch]
+        batch = [
+            numpy.concatenate((sentences_test[i],
+                               experiment.load_sentence_id(
+                                   feature_path,
+                                   i,
+                                   num_additional_features, 3)), axis=1) for i in sentence_ids_in_batch
+        ]
+        #batch = [sentences_test[i] for i in sentence_ids_in_batch]
         cost, predicted_labels, predicted_probs = model.process_batch(batch, is_training=False, learningrate=0.0)
 
         assert(len(sentence_ids_in_batch) == len(predicted_labels))
