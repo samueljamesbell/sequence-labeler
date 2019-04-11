@@ -23,7 +23,7 @@ def print_predictions(print_probs, model_path, input_file):
     sentences_test = experiment.read_input_files(input_file)
     batches_of_sentence_ids = experiment.create_batches_of_sentence_ids(sentences_test, config["batch_equal_size"], config['max_batch_size'])
 
-    feature_path = experiment.read_input_features(input_file, 'models/')
+    feature_path = experiment.read_input_features(input_file, '../models/features/')
 
     print(feature_path)
 
