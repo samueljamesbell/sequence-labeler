@@ -14,7 +14,7 @@ def print_predictions(print_probs, model_path, input_file):
     predictions_cache = {}
 
     num_additional_features = config['num_additional_features']
-    num_additional_feature_vectors = 3
+    num_additional_feature_vectors = config.get('num_additional_feature_vectors', 1)
 
     id2label = collections.OrderedDict()
     for label in model.label2id:
@@ -38,7 +38,7 @@ def print_predictions(print_probs, model_path, input_file):
                                experiment.load_sentence_id(
                                    feature_path,
                                    i,
-                                   num_additional_features, 3)), axis=1) for i in sentence_ids_in_batch
+                                   num_additional_features, num_additional_feature_vectors)), axis=1) for i in sentence_ids_in_batch
         ]
         #batch = [sentences_test[i] for i in sentence_ids_in_batch]
         cost, predicted_labels, predicted_probs = model.process_batch(batch, is_training=False, learningrate=0.0)
