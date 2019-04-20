@@ -333,48 +333,6 @@ class SequenceLabeler(object):
 
         if self.config['add_features_to_output']:
             with tf.variable_scope("features"):
-
-                # THIS IS BIG, BAD AND HARDCODED... to 3 vectors of additional
-                # features (i.e. ELMo).
-
-                print(processed_tensor)
-                # (B T F)
-                activations_1 = tf.layers.dense(
-                        processed_tensor,
-                        self.config['num_additional_features'],
-                        kernel_regularizer=l2_regularizer,
-                        activation=tf.tanh)
-
-                activations_2 = tf.layers.dense(
-                        processed_tensor,
-                        self.config['num_additional_features'],
-                        kernel_regularizer=l2_regularizer,
-                        activation=tf.tanh)
-
-                activations_3 = tf.layers.dense(
-                        processed_tensor,
-                        self.config['num_additional_features'],
-                        kernel_regularizer=l2_regularizer,
-                        activation=tf.tanh)
-
-                # (B T V F)
-                activations = tf.stack([activations_1, activations_2, activations_2], axis=2)
-
-                # (B T V F)
-                alphas = tf.nn.softmax(activations, name='alphas', axis=2)
-
-                # (B T F)
-                additional_features = tf.reduce_sum(
-                        self.additional_features * alphas,
-                        axis=2)
-
-                if self.config.get('scale_additional_features', False):
-                    gamma = tf.get_variable('additional_features_gamma',
-                        shape=(1, ),
-                        initializer=tf.ones_initializer,
-                        trainable=True)
-                    additional_features = additional_features * gamma
-
                 processed_tensor = tf.concat([processed_tensor, additional_features], 2)
                 print(processed_tensor)
 
