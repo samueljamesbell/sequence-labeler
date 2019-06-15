@@ -160,10 +160,7 @@ def process_sentences(data, labeler, is_training, learningrate, config, name,
     """
     evaluator = SequenceLabelingEvaluator(config["main_label"], labeler.label2id, config["conll_eval"])
     batches_of_sentence_ids = create_batches_of_sentence_ids(data, config["batch_equal_size"], config["max_batch_size"])
-#    if is_training == True:
-#        random.shuffle(batches_of_sentence_ids)
 
-    # (num_words x num_vectors x num_features)
     for sentence_ids_in_batch in batches_of_sentence_ids:
         batch = [
             numpy.concatenate((data[i],
@@ -233,7 +230,6 @@ def run_experiment(config_path):
         for epoch in range(config["epochs"]):
             print("EPOCH: " + str(epoch))
             print("current_learningrate: " + str(learningrate))
-#            random.shuffle(data_train)
 
             results_train = process_sentences(data_train, labeler,
                     is_training=True, learningrate=learningrate, config=config,

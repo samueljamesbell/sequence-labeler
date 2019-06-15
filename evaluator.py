@@ -73,10 +73,6 @@ class SequenceLabelingEvaluator(object):
             results[name + "_conll_p"] = conll_metrics_overall.prec
             results[name + "_conll_r"] = conll_metrics_overall.rec
             results[name + "_conll_f"] = conll_metrics_overall.fscore
-#            for i, m in sorted(conll_metrics_by_type.items()):
-#                results[name + "_conll_p_" + str(i)] = m.prec
-#                results[name + "_conll_r_" + str(i)] = m.rec
-#                results[name + "_conll_f_" + str(i)] = m.fscore #str(m.fscore) + " " + str(conll_counts.t_found_guessed[i])
 
         return results
 

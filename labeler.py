@@ -123,17 +123,6 @@ class SequenceLabeler(object):
             trainable=(True if self.config["train_embeddings"] == True else False))
         input_tensor = tf.nn.embedding_lookup(self.word_embeddings, self.word_ids)
 
-#        feature_vocab_size = 2 ** int(self.config['num_additional_features'])
-#        print('Feature vocab size: {}'.format(feature_vocab_size))
-#        self.feature_embeddings = tf.get_variable("feature_embeddings", 
-#            shape=[feature_vocab_size, self.config.get("feature_embedding_size", 100)], 
-#            initializer=(tf.zeros_initializer() if self.config["emb_initial_zero"] == True else self.initializer), 
-#            trainable=True)
-#        feature_tensor = tf.nn.embedding_lookup(self.feature_embeddings, self.categoricals)
-
-        if self.config['add_categoricals_to_input']:
-            input_tensor = tf.concat([input_tensor, feature_tensor], axis=2)
-
         l2_regularizer = tf.contrib.layers.l2_regularizer(scale=self.config['l2_lambda']) if self.config.get('l2_lambda') else None
 
         if self.config.get('num_additional_feature_vectors', 1) == 1:
@@ -141,50 +130,6 @@ class SequenceLabeler(object):
             additional_features.set_shape((input_tensor.shape[0],
                                            input_tensor.shape[1],
                                            self.config['num_additional_features']))
-        elif self.config.get('additional_feature_integration_method', 'attention') == 'attention':
-            activations = tf.layers.dense(
-                    input_tensor,
-                    self.config['num_additional_feature_vectors'],
-                    kernel_regularizer=l2_regularizer,
-                    activation=tf.tanh)
-            alphas = tf.nn.softmax(activations, name='alphas')
-            additional_features = tf.reduce_sum(
-                    self.additional_features * tf.expand_dims(alphas, -1),
-                    axis=2)
-
-        elif self.config.get('additional_feature_integration_method', 'attention') == 'elementwise-attention':
-                # (B T F)
-                activations_1 = tf.layers.dense(
-                        input_tensor,
-                        self.config['num_additional_features'],
-                        kernel_regularizer=l2_regularizer,
-                        activation=tf.tanh)
-                print(activations_1)
-                activations_2 = tf.layers.dense(
-                        input_tensor,
-                        self.config['num_additional_features'],
-                        kernel_regularizer=l2_regularizer,
-                        activation=tf.tanh)
-                activations_3 = tf.layers.dense(
-                        input_tensor,
-                        self.config['num_additional_features'],
-                        kernel_regularizer=l2_regularizer,
-                        activation=tf.tanh)
-
-                # (B T V F)
-                activations = tf.stack([activations_1, activations_2, activations_2], axis=2)
-                print(activations)
-
-                # (B T V F)
-                alphas = tf.nn.softmax(activations, name='alphas', axis=2)
-                print(alphas)
-
-                # (B T F)
-                additional_features = tf.reduce_sum(
-                        self.additional_features * alphas,
-                        axis=2)
-                print(additional_features)
-
         elif self.config.get('additional_feature_integration_method', 'attention') == 'layerwise-sum':
             W = tf.get_variable(
                 'w_layerwise',
@@ -193,25 +138,16 @@ class SequenceLabeler(object):
                 regularizer=l2_regularizer,
                 trainable=True)
 
-            # normalize the weights
             normed_weights = tf.split(
                 tf.nn.softmax(W + 1.0 / self.config['num_additional_feature_vectors']),
                 self.config['num_additional_feature_vectors'])
 
-            # split LM layers
             layers = tf.split(self.additional_features,
                 self.config['num_additional_feature_vectors'],
                 axis=2) 
 
-            # compute the weighted LM activations
             weighted_layers = [w * tf.squeeze(t, squeeze_dims=2) for w, t in zip(normed_weights, layers)]
             additional_features = tf.add_n(weighted_layers)
-        elif self.config.get('additional_feature_integration_method', 'attention') == 'elementwise-sum':
-            weights = tf.Variable(tf.random_normal([
-                self.config['num_additional_feature_vectors'],
-                self.config['num_additional_features']], stddev=0.1))
-            alphas = tf.nn.softmax(weights, axis=0, name='alphas')
-            additional_features = tf.reduce_sum( self.additional_features * tf.expand_dims(tf.expand_dims(alphas, 0), 0), axis=2)
 
         if self.config.get('scale_additional_features', False):
             gamma = tf.get_variable('additional_features_gamma',
