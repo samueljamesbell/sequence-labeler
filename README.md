@@ -5,19 +5,25 @@ This is a neural network sequence labeling system. Given a sequence of tokens, i
 
 The main model implements a bidirectional LSTM for sequence tagging. In addition, you can incorporate character-level information -- either by concatenating a character-based representation, or by using an attention/gating mechanism for combining it with a word embedding.
 
+Vectors of additional features for each token can also be incorporated, including contextual embeddings such as ELMo, BERT or Flair embeddings.
+
 Run with:
 
     python experiment.py config.conf
 
 Preferably with Tensorflow set up to use CUDA, so the process can run on a GPU. The script will train the model on the training data, test it on the test data, and print various evaluation metrics.
 
+Pre-trained models
+------------------
+
+Models evaluated in Bell, Yannakoudakis & Rei (2019, in press) can be found [here](https://github.com/samueljamesbell/sequence-labeler/releases/tag/v1.0).
+
 Requirements
 -------------------------
 
-* python (tested with 2.7.12 and 3.5.2)
-* numpy (tested with 1.13.3 and 1.14.0)
-* tensorflow (tested with 1.3.0 and 1.4.1)
+Requires Python 3. Install Python dependencies with:
 
+    pip install -r requirements.txt
 
 Data format
 -------------------------
@@ -142,6 +148,12 @@ The language modeling objective is described here:
 [**Semi-supervised Multitask Learning for Sequence Labeling**](https://arxiv.org/abs/1704.07156)  
 Marek Rei  
 *In Proceedings of the 55th Annual Meeting of the Association for Computational Linguistics (ACL-2017)*
+
+The model is extended to make use of contextual embeddings (ELMo, BERT and Flair embeddings) here:
+
+**Context is Key: Grammatical Error Detection with Contextual Word Representations**  
+Samuel Bell, Helen Yannakoudakis and Marek Rei  
+*In Press*
 
 The CRF implementation is based on:
 
