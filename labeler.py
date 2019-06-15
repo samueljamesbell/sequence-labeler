@@ -95,7 +95,7 @@ class SequenceLabeler(object):
     def construct_network(self):
         self.word_ids = tf.placeholder(tf.int32, [None, None], name="word_ids")
         self.char_ids = tf.placeholder(tf.int32, [None, None, None], name="char_ids")
-        self.additional_features = tf.placeholder(tf.float32, [None, None, self.config['num_additional_features']], name="additional_features")
+        self.additional_features = tf.placeholder(tf.float32, [None, None, self.config['num_additional_feature_vectors'], self.config['num_additional_features']], name="additional_features")
         self.categoricals = tf.placeholder(tf.int32, [None, None], name="categoricals")
 
         self.sentence_lengths = tf.placeholder(tf.int32, [None], name="sentence_lengths")
@@ -123,20 +123,105 @@ class SequenceLabeler(object):
             trainable=(True if self.config["train_embeddings"] == True else False))
         input_tensor = tf.nn.embedding_lookup(self.word_embeddings, self.word_ids)
 
-        feature_vocab_size = 2 ** int(self.config['num_additional_features'])
-        print('Feature vocab size: {}'.format(feature_vocab_size))
-        self.feature_embeddings = tf.get_variable("feature_embeddings", 
-            shape=[feature_vocab_size, self.config.get("feature_embedding_size", 100)], 
-            initializer=(tf.zeros_initializer() if self.config["emb_initial_zero"] == True else self.initializer), 
-            trainable=True)
-        feature_tensor = tf.nn.embedding_lookup(self.feature_embeddings, self.categoricals)
+#        feature_vocab_size = 2 ** int(self.config['num_additional_features'])
+#        print('Feature vocab size: {}'.format(feature_vocab_size))
+#        self.feature_embeddings = tf.get_variable("feature_embeddings", 
+#            shape=[feature_vocab_size, self.config.get("feature_embedding_size", 100)], 
+#            initializer=(tf.zeros_initializer() if self.config["emb_initial_zero"] == True else self.initializer), 
+#            trainable=True)
+#        feature_tensor = tf.nn.embedding_lookup(self.feature_embeddings, self.categoricals)
 
         if self.config['add_categoricals_to_input']:
             input_tensor = tf.concat([input_tensor, feature_tensor], axis=2)
 
-        # Concat the additional features tensor to our input (word embeddings) tensor.
+        l2_regularizer = tf.contrib.layers.l2_regularizer(scale=self.config['l2_lambda']) if self.config.get('l2_lambda') else None
+
+        if self.config.get('num_additional_feature_vectors', 1) == 1:
+            additional_features = tf.squeeze(self.additional_features)
+            additional_features.set_shape((input_tensor.shape[0],
+                                           input_tensor.shape[1],
+                                           self.config['num_additional_features']))
+        elif self.config.get('additional_feature_integration_method', 'attention') == 'attention':
+            activations = tf.layers.dense(
+                    input_tensor,
+                    self.config['num_additional_feature_vectors'],
+                    kernel_regularizer=l2_regularizer,
+                    activation=tf.tanh)
+            alphas = tf.nn.softmax(activations, name='alphas')
+            additional_features = tf.reduce_sum(
+                    self.additional_features * tf.expand_dims(alphas, -1),
+                    axis=2)
+
+        elif self.config.get('additional_feature_integration_method', 'attention') == 'elementwise-attention':
+                # (B T F)
+                activations_1 = tf.layers.dense(
+                        input_tensor,
+                        self.config['num_additional_features'],
+                        kernel_regularizer=l2_regularizer,
+                        activation=tf.tanh)
+                print(activations_1)
+                activations_2 = tf.layers.dense(
+                        input_tensor,
+                        self.config['num_additional_features'],
+                        kernel_regularizer=l2_regularizer,
+                        activation=tf.tanh)
+                activations_3 = tf.layers.dense(
+                        input_tensor,
+                        self.config['num_additional_features'],
+                        kernel_regularizer=l2_regularizer,
+                        activation=tf.tanh)
+
+                # (B T V F)
+                activations = tf.stack([activations_1, activations_2, activations_2], axis=2)
+                print(activations)
+
+                # (B T V F)
+                alphas = tf.nn.softmax(activations, name='alphas', axis=2)
+                print(alphas)
+
+                # (B T F)
+                additional_features = tf.reduce_sum(
+                        self.additional_features * alphas,
+                        axis=2)
+                print(additional_features)
+
+        elif self.config.get('additional_feature_integration_method', 'attention') == 'layerwise-sum':
+            W = tf.get_variable(
+                'w_layerwise',
+                shape=(self.config['num_additional_feature_vectors'],),
+                initializer=tf.zeros_initializer,
+                regularizer=l2_regularizer,
+                trainable=True)
+
+            # normalize the weights
+            normed_weights = tf.split(
+                tf.nn.softmax(W + 1.0 / self.config['num_additional_feature_vectors']),
+                self.config['num_additional_feature_vectors'])
+
+            # split LM layers
+            layers = tf.split(self.additional_features,
+                self.config['num_additional_feature_vectors'],
+                axis=2) 
+
+            # compute the weighted LM activations
+            weighted_layers = [w * tf.squeeze(t, squeeze_dims=2) for w, t in zip(normed_weights, layers)]
+            additional_features = tf.add_n(weighted_layers)
+        elif self.config.get('additional_feature_integration_method', 'attention') == 'elementwise-sum':
+            weights = tf.Variable(tf.random_normal([
+                self.config['num_additional_feature_vectors'],
+                self.config['num_additional_features']], stddev=0.1))
+            alphas = tf.nn.softmax(weights, axis=0, name='alphas')
+            additional_features = tf.reduce_sum( self.additional_features * tf.expand_dims(tf.expand_dims(alphas, 0), 0), axis=2)
+
+        if self.config.get('scale_additional_features', False):
+            gamma = tf.get_variable('additional_features_gamma',
+                shape=(1, ),
+                initializer=tf.ones_initializer,
+                trainable=True)
+            additional_features = additional_features * gamma
+
         if self.config['add_features_to_input']:
-            input_tensor = tf.concat([input_tensor, self.additional_features], axis=2)
+            input_tensor = tf.concat([input_tensor, additional_features], axis=2)
 
         if self.config["char_embedding_size"] > 0 and self.config["char_recurrent_size"] > 0:
             with tf.variable_scope("chars"), tf.control_dependencies([tf.assert_equal(tf.shape(self.char_ids)[2],
@@ -248,14 +333,7 @@ class SequenceLabeler(object):
 
         if self.config['add_features_to_output']:
             with tf.variable_scope("features"):
-                additional_features = self.additional_features
-
-                if self.config.get('additional_features_dropout', 0.0) > 0:
-                    additional_features_dropout = self.config["additional_features_dropout"] * tf.cast(self.is_training, tf.float32) + (1.0 - tf.cast(self.is_training, tf.float32))
-                    additional_features = tf.nn.dropout(self.additional_features, additional_features_dropout)
-
-                processed_tensor = tf.concat([processed_tensor, additional_features], axis=2)
-
+                processed_tensor = tf.concat([processed_tensor, additional_features], 2)
 
                 if self.config.get('lstm_over_features'):
                     if self.config.get("additional_features_projection", 0) > 0:
@@ -401,6 +479,7 @@ class SequenceLabeler(object):
         categoricals = numpy.zeros((len(batch), max_sentence_length), dtype=numpy.int32)
         additional_features = numpy.zeros((len(batch),
                                            max_sentence_length,
+                                           self.config['num_additional_feature_vectors'],
                                            self.config['num_additional_features']),
                                           dtype=numpy.float32)
 
@@ -411,9 +490,10 @@ class SequenceLabeler(object):
             for j in range(len(batch[i])):
                 word_ids[i][j] = self.translate2id(batch[i][j][0], self.word2id, self.UNK, lowercase=self.config["lowercase"], replace_digits=self.config["replace_digits"], singletons=singletons, singletons_prob=singletons_prob)
                 label_ids[i][j] = self.translate2id(batch[i][j][1], self.label2id, None)
-                additional_features[i][j] = batch[i][j][2:].astype(numpy.float32)
+                additional_features[i][j] = numpy.reshape(batch[i][j][2:].astype(numpy.float32), (self.config['num_additional_feature_vectors'], self.config['num_additional_features']))
                 if self.config['add_categoricals_to_input']:
-                    categoricals[i][j] = int(''.join(map(str, additional_features[i][j].astype(int))), 2)
+                    categoricals[i][j] = int(''.join(map(str, batch[i][j][2:].astype(int))), 2)
+
                 word_lengths[i][j] = len(batch[i][j][0])
                 for k in range(min(len(batch[i][j][0]), max_word_length)):
                     char_ids[i][j][k] = self.translate2id(batch[i][j][0][k], self.char2id, self.CUNK)

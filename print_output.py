@@ -13,6 +13,9 @@ def print_predictions(print_probs, model_path, input_file):
     config = model.config
     predictions_cache = {}
 
+    num_additional_features = config['num_additional_features']
+    num_additional_feature_vectors = config.get('num_additional_feature_vectors', 1)
+    
     id2label = collections.OrderedDict()
     for label in model.label2id:
         id2label[model.label2id[label]] = label
@@ -20,8 +23,17 @@ def print_predictions(print_probs, model_path, input_file):
     sentences_test = experiment.read_input_files(input_file)
     batches_of_sentence_ids = experiment.create_batches_of_sentence_ids(sentences_test, config["batch_equal_size"], config['max_batch_size'])
 
+    feature_path = experiment.read_input_features(input_file, 'models/features/')
+
     for sentence_ids_in_batch in batches_of_sentence_ids:
-        batch = [sentences_test[i] for i in sentence_ids_in_batch]
+        batch = [
+            numpy.concatenate((sentences_test[i],
+                               experiment.load_sentence_id(
+                                   feature_path,
+                                   i,
+                                   num_additional_features, num_additional_feature_vectors)), axis=1) for i in sentence_ids_in_batch
+        ]
+        #batch = [sentences_test[i] for i in sentence_ids_in_batch]
         cost, predicted_labels, predicted_probs = model.process_batch(batch, is_training=False, learningrate=0.0)
 
         assert(len(sentence_ids_in_batch) == len(predicted_labels))
@@ -54,7 +66,8 @@ def print_predictions(print_probs, model_path, input_file):
                 continue
             assert(str(sentence_id) in predictions_cache)
             assert(len(predictions_cache[str(sentence_id)]) > word_id)
-            print(line.strip() + "\t" + predictions_cache[str(sentence_id)][word_id].strip())
+            t, g, *_ = line.strip().split('\t')
+            print('{}\t{}\tNaN\t{}'.format(t, g, predictions_cache[str(sentence_id)][word_id].strip()))
             word_id += 1
     
     sys.stderr.write("Processed: " + input_file + "\n")

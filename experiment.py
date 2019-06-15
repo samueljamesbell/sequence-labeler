@@ -8,6 +8,7 @@ import os
 import random
 import sys
 import tempfile
+import progressbar
 
 
 try:
@@ -21,33 +22,28 @@ from evaluator import SequenceLabelingEvaluator
 
 
 def read_input_features(path, temp_dir):
-    sentences = []
-    with open(path, "r", encoding='utf-8') as f:
-        sentence = []
-        for line in f:
-            line = line.strip()
-            if len(line) > 0:
-                _, _, *features = line.split()
-                sentence.append(features)
-            elif len(line) == 0 and len(sentence) > 0:
-                sentences.append(sentence)
-                sentence = []
-        if len(sentence) > 0:
-                sentences.append(sentence)
-
+    print('Reading features from %s'.format(path))
     _, tmp_path = tempfile.mkstemp(dir=temp_dir)
-    with open(tmp_path, 'w') as f:
-        for sentence in sentences:
-            to_write = '{}\n'.format('\t'.join(list(itertools.chain.from_iterable(sentence))))
-            f.write(to_write)
+    with open(tmp_path, 'w') as f_w:
+        with open(path, "r", encoding='utf-8') as f_r:
+            sentence = []
+            for line in progressbar.progressbar(f_r):
+                line = line.strip()
+                if len(line) > 0:
+                    _, _, *features = line.split()
+                    sentence.append(features)
+                elif len(line) == 0 and len(sentence) > 0:
+                    to_write = '{}\n'.format('\t'.join(list(itertools.chain.from_iterable(sentence))))
+                    f_w.write(to_write)
 
+                    sentence = []
     return tmp_path
 
 
-def load_sentence_id(path, sentence_id, num_features):
+def load_sentence_id(path, sentence_id, num_features, num_vectors=1):
     feature_line = linecache.getline(path, int(sentence_id) + 1).strip()
     features = numpy.fromstring(feature_line, sep='\t')
-    return numpy.array(numpy.split(features, len(features) / num_features))
+    return numpy.array(numpy.split(features, len(features) / (num_features * num_vectors)))
 
 
 def read_input_files(file_paths, max_sentence_length=-1):
@@ -60,9 +56,10 @@ def read_input_files(file_paths, max_sentence_length=-1):
     sentences = []
     line_length = None
     for file_path in file_paths.strip().split(","):
+        print('Reading input data from %s'.format(file_path))
         with open(file_path, "r", encoding='utf-8') as f:
             sentence = []
-            for line in f:
+            for line in progressbar.progressbar(f):
                 line = line.strip()
                 if len(line) > 0:
                     line_parts = line.split()
@@ -156,7 +153,8 @@ def create_batches_of_sentence_ids(sentences, batch_equal_size, max_batch_size):
 
 
 
-def process_sentences(data, labeler, is_training, learningrate, config, name, feature_path, num_additional_features):
+def process_sentences(data, labeler, is_training, learningrate, config, name,
+        feature_path, num_additional_features, num_vectors):
     """
     Process all the sentences with the labeler, return evaluation metrics.
     """
@@ -165,11 +163,13 @@ def process_sentences(data, labeler, is_training, learningrate, config, name, fe
 #    if is_training == True:
 #        random.shuffle(batches_of_sentence_ids)
 
+    # (num_words x num_vectors x num_features)
     for sentence_ids_in_batch in batches_of_sentence_ids:
         batch = [
             numpy.concatenate((data[i],
                                load_sentence_id(feature_path, i,
-                                                num_additional_features)), axis=1)
+                                                num_additional_features,
+                                                num_vectors)), axis=1)
             for i in sentence_ids_in_batch
         ]
 
@@ -237,13 +237,16 @@ def run_experiment(config_path):
 
             results_train = process_sentences(data_train, labeler,
                     is_training=True, learningrate=learningrate, config=config,
-                    name="train", feature_path=feature_path_train, num_additional_features=config['num_additional_features'])
+                    name="train", feature_path=feature_path_train,
+                    num_additional_features=config['num_additional_features'],
+                    num_vectors=config.get('num_additional_feature_vectors', 1))
 
             if data_dev != None:
                 results_dev = process_sentences(data_dev, labeler,
                         is_training=False, learningrate=0.0, config=config,
                         name="dev", feature_path=feature_path_dev,
-                        num_additional_features=config['num_additional_features'])
+                        num_additional_features=config['num_additional_features'],
+                        num_vectors=config.get('num_additional_feature_vectors', 1))
 
                 if math.isnan(results_dev["dev_cost_sum"]) or math.isinf(results_dev["dev_cost_sum"]):
                     sys.stderr.write("ERROR: Cost is NaN or Inf. Exiting.\n")
@@ -285,7 +288,8 @@ def run_experiment(config_path):
             results_test = process_sentences(data_test, labeler,
                     is_training=False, learningrate=0.0, config=config,
                     name="test"+str(i), feature_path=feature_path_test,
-                    num_additional_features=config['num_additional_features'])
+                    num_additional_features=config['num_additional_features'],
+                    num_vectors=config.get('num_additional_feature_vectors', 1))
             i += 1
 
 
