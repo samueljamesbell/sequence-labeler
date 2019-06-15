@@ -15,7 +15,7 @@ def print_predictions(print_probs, model_path, input_file):
 
     num_additional_features = config['num_additional_features']
     num_additional_feature_vectors = config.get('num_additional_feature_vectors', 1)
-
+    
     id2label = collections.OrderedDict()
     for label in model.label2id:
         id2label[model.label2id[label]] = label
@@ -28,9 +28,9 @@ def print_predictions(print_probs, model_path, input_file):
     print(feature_path)
 
     print(len(experiment.load_sentence_id(feature_path, 0,
-        num_additional_features, 3)))
+        num_additional_features, num_additional_feature_vectors)))
     print(len(experiment.load_sentence_id(feature_path, 0,
-        num_additional_features, 3)[0]))
+        num_additional_features, num_additional_feature_vectors)[0]))
 
     for sentence_ids_in_batch in batches_of_sentence_ids:
         batch = [
@@ -73,7 +73,8 @@ def print_predictions(print_probs, model_path, input_file):
                 continue
             assert(str(sentence_id) in predictions_cache)
             assert(len(predictions_cache[str(sentence_id)]) > word_id)
-            print(line.strip() + "\t" + predictions_cache[str(sentence_id)][word_id].strip())
+            t, g, *_ = line.strip().split('\t')
+            print('{}\t{}\tNaN\t{}'.format(t, g, predictions_cache[str(sentence_id)][word_id].strip()))
             word_id += 1
     
     sys.stderr.write("Processed: " + input_file + "\n")
