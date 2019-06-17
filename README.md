@@ -102,6 +102,11 @@ Edit the values in config.conf as needed:
 * **garbage_collection** - Whether garbage collection is explicitly called. Makes things slower but can operate with bigger models.
 * **lstm_use_peepholes** - Whether to use the LSTM implementation with peepholes.
 * **random_seed** - Random seed for initialisation and data shuffling. This can affect results, so for robust conclusions I recommend running multiple experiments with different seeds and averaging the metrics.
+* **num_additional_features** - Number of additional features (e.g. length of contextualized embeddings) to incorporate per token.
+* **num_additional_feature_vectors** - Number of additional feature vectors (e.g. if more than one per token).
+* **add_features_to_input** - Integrate additional features before the word-level LSTM.
+* **add_features_to_output** - Integrate additional features with the output of the word-level LSTM.
+* **feature_dir** - Directory in which to cache feature vectors.
 
 
 
@@ -173,7 +178,7 @@ License
 The code is distributed under the Affero General Public License 3 (AGPL-3.0) by default. 
 If you wish to use it under a different license, feel free to get in touch.
 
-Copyright (c) 2018 Marek Rei
+Copyright (c) 2018 Marek Rei and Samuel Bell
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as
