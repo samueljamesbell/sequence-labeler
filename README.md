@@ -156,7 +156,7 @@ Marek Rei
 
 The model is extended to make use of contextual embeddings (ELMo, BERT and Flair embeddings) here:
 
-[**Context is Key: Grammatical Error Detection with Contextual Word Representations**](https://arxiv.org/abs/1906.06593)
+[**Context is Key: Grammatical Error Detection with Contextual Word Representations**](https://arxiv.org/abs/1906.06593)  
 Samuel Bell, Helen Yannakoudakis and Marek Rei  
 *In Press*
 
